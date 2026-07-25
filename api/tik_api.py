@@ -50,8 +50,7 @@ class TukTukAPI:
         return None
 
     def search_movie(self, imdb_id):
-        """تحويل كود IMDB إلى اسم فيلم والبحث عنه للحصول على رابطه المباشر"""
-        # 1. جلب بيانات الفيلم مجاناً من Cinemeta
+        """تحويل كود IMDB إلى اسم فيلم والبحث عنه للحصول على رابطه المباشر بذكاء"""
         meta_url = f"https://v3-cinemeta.strem.io/meta/movie/{imdb_id}.json"
         try:
             meta_res = requests.get(meta_url).json()
@@ -60,17 +59,17 @@ class TukTukAPI:
             
             print(f"🔎 جاري البحث في الموقع عن: {movie_name}")
             
-            # 2. البحث في الموقع عبر البروكسي
             search_url = f"https://zx33.tuktuk-sa.online/?s={quote(movie_name)}"
             res = self.session.get(self.get_proxied_url(search_url), timeout=15)
             soup = BeautifulSoup(res.text, "html.parser")
             
-            # 3. استخراج أول رابط يخص فيلم
             for a in soup.find_all("a", href=True):
                 href = a["href"]
-                if "tuktuk-sa.online" in href and ("/فيلم-" in href or "/movie" in href):
-                    print(f"🎯 تم العثور على رابط الفيلم: {href}")
-                    return href
+                # تحديث الصياد: تجاهل اسم الدومين والبحث عن مسار الفيلم فقط (سواء عربي أو مرمز)
+                if "/فيلم-" in href or "/movie" in href or "%D9%81%D9%8A%D9%84%D9%85" in href:
+                    if "/category/" not in href and "/page/" not in href:
+                        print(f"🎯 تم العثور على رابط الفيلم: {href}")
+                        return href
         except Exception as e:
             print(f"❌ خطأ أثناء البحث: {e}")
         return None
@@ -79,7 +78,6 @@ class TukTukAPI:
         """الوظيفة الرئيسية: بحث -> جلب الصفحة -> فك الحماية -> إرجاع الروابط"""
         stremio_streams = []
         
-        # جلب رابط الفيلم بناءً على معرف IMDB
         movie_url = self.search_movie(imdb_id)
         if not movie_url:
             return stremio_streams
