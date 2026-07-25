@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.tuktuk_api import TukTukAPI
+from api.tik_api import TukTukAPI
 
 app = FastAPI(title="TukTuk Stremio Engine")
 
