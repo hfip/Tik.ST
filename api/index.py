@@ -16,12 +16,12 @@ app.add_middleware(
 MANIFEST = {
     "id": "plex.abdullah.tuktuk.addon",
     "version": "1.0.0",
-    "name": "TukTuk.Stremio",
+    "name": "TukTuk",
     "description": "إضافة توك توك سينما المباشرة",
-    "icon": "https://raw.githubusercontent.com/.../icon.png", # يمكنك وضع رابط أيقونة هنا
+    "icon": "https://raw.githubusercontent.com/h-fip/TukTuk_ST/main/icon.png", 
     "resources": ["stream"],
-    "types": ["movie", "series"],
-    "idPrefixes": ["tt"] # العمل باستخدام معرفات IMDB
+    "types": ["movie"],
+    "idPrefixes": ["tt"]
 }
 
 tuktuk = TukTukAPI()
@@ -36,10 +36,10 @@ def get_manifest():
 
 @app.get("/stream/{type}/{video_id}.json")
 def get_streams(type: str, video_id: str):
-    # ملاحظة: في النسخة النهائية نحتاج دالة تحول video_id (مثل tt1234567) إلى رابط الفيلم في توك توك
-    # مؤقتاً للتجربة، سنضع رابطاً ثابتاً للفيلم الذي فحصناه
-    test_movie_url = "https://zx33.tuktuk-sa.online/فيلم-the-odyssey-2026-مترجم-اون-لاين-bet/"
+    # مسح الامتداد .json إذا كان موجوداً في الـ ID
+    imdb_id = video_id.replace(".json", "")
     
-    streams = tuktuk.get_streams(test_movie_url)
+    # استدعاء المحرك مع كود الـ IMDB
+    streams = tuktuk.get_streams(imdb_id)
     
     return {"streams": streams}
