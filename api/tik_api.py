@@ -8,7 +8,6 @@ from bs4 import BeautifulSoup
 from urllib.parse import quote
 import base64
 
-# إعداد السجلات لتظهر في Render بشكل ألوان وواضح
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TukTukLogger")
 
@@ -37,6 +36,35 @@ class TukTukAPI:
         except:
             return None
 
+    def resolve_movie_name(self, id_str):
+        """دالة ذكية تحول id الفيلم (سواء tmdb أو imdb) إلى اسم الفيلم"""
+        try:
+            # إذا كان المعرف من نوع tmdb:603
+            if id_str.startswith("tmdb:"):
+                tmdb_id = id_str.split(":")[1]
+                # تحويل عبر cinemeta tmdb endpoint
+                meta_url = f"https://v3-cinemeta.strem.io/meta/movie/tmdb:{tmdb_id}.json"
+                res = requests.get(meta_url, timeout=5)
+                if res.status_code == 200 and res.headers.get("content-type", "").startswith("application/json"):
+                    return res.json().get("meta", {}).get("name")
+                
+                # خطة بديلة لطلب Cinemeta بالعنوان العادي
+                meta_url_alt = f"https://v3-cinemeta.strem.io/catalog/movie/top/search={tmdb_id}.json"
+                res_alt = requests.get(meta_url_alt, timeout=5)
+                if res_alt.status_code == 200:
+                    metas = res_alt.json().get("metas", [])
+                    if metas: return metas[0].get("name")
+
+            # إذا كان المعرف IMDb العادي tt0133093
+            else:
+                meta_url = f"https://v3-cinemeta.strem.io/meta/movie/{id_str}.json"
+                res = requests.get(meta_url, timeout=5)
+                if res.status_code == 200 and "application/json" in res.headers.get("content-type", ""):
+                    return res.json().get("meta", {}).get("name")
+        except Exception as e:
+            logger.error(f"❌ خطأ جلب اسم الفيلم لـ {id_str}: {e}")
+        return None
+
     def _extract_direct_stream(self, player_url):
         try:
             res = self.session.get(self.get_proxied_url(player_url), timeout=5)
@@ -47,21 +75,21 @@ class TukTukAPI:
             logger.warning(f"⚠️ فشل استخراج المباشر من {player_url}: {e}")
         return None
 
-    def search_movie(self, imdb_id):
-        logger.info(f"🔍 [1/3] بدء البحث عن IMDB: {imdb_id}")
-        meta_url = f"https://v3-cinemeta.strem.io/meta/movie/{imdb_id}.json"
-        try:
-            meta_res = requests.get(meta_url, timeout=5).json()
-            movie_name = meta_res.get("meta", {}).get("name", "")
-            logger.info(f"📌 [Cinemeta] اسم الفيلم: '{movie_name}'")
-            if not movie_name: return None
+    def search_movie(self, id_str):
+        logger.info(f"🔍 [1/3] بدء البحث عن المعرف: {id_str}")
+        movie_name = self.resolve_movie_name(id_str)
+        
+        if not movie_name:
+            logger.error("❌ لم نتمكن من الوصول لاسم الفيلم من Cinemeta.")
+            return None
             
+        logger.info(f"📌 [Cinemeta] اسم الفيلم المكتشف: '{movie_name}'")
+        
+        try:
             search_url = f"https://zx33.tuktuk-sa.online/?s={quote(movie_name)}"
-            logger.info(f"🌐 [Search URL] جاري الطلب عبر البروكسي: {search_url}")
+            logger.info(f"🌐 [Search URL] جاري البحث: {search_url}")
             
             res = self.session.get(self.get_proxied_url(search_url), timeout=8)
-            logger.info(f"📊 [Search Status] كود الاستجابة: {res.status_code}")
-            
             soup = BeautifulSoup(res.text, "html.parser")
             
             for a in soup.find_all("a", href=True):
@@ -75,13 +103,13 @@ class TukTukAPI:
             logger.error(f"❌ [Search Error] خطأ أثناء البحث: {e}")
         return None
 
-    def get_streams(self, imdb_id):
+    def get_streams(self, id_str):
         logger.info("==========================================")
-        logger.info(f"🚀 [NEW REQUEST] طلب بث جديد لـ: {imdb_id}")
+        logger.info(f"🚀 [NEW REQUEST] طلب بث جديد لـ: {id_str}")
         logger.info("==========================================")
         
         stremio_streams = []
-        movie_url = self.search_movie(imdb_id)
+        movie_url = self.search_movie(id_str)
         if not movie_url:
             logger.error("🚨 توقف العمل: تعذر إيجاد رابط الفيلم.")
             return stremio_streams
@@ -89,8 +117,6 @@ class TukTukAPI:
         try:
             logger.info(f"🔍 [2/3] جلب صفحة الفيلم: {movie_url}")
             res = self.session.get(self.get_proxied_url(movie_url), timeout=8)
-            logger.info(f"📊 [Movie Page Status] كود الاستجابة: {res.status_code}")
-            
             soup = BeautifulSoup(res.text, "html.parser")
             players = []
             
@@ -99,14 +125,11 @@ class TukTukAPI:
             if main_iframe:
                 if main_iframe.get("data-crypt"):
                     decoded = self.decode_base64(main_iframe["data-crypt"])
-                    if decoded: 
-                        players.append(decoded)
-                        logger.info(f"🎬 [Main Frame Decoded]: {decoded}")
+                    if decoded: players.append(decoded)
                 elif main_iframe.get("src"):
                     players.append(main_iframe["src"])
-                    logger.info(f"🎬 [Main Frame Raw]: {main_iframe['src']}")
 
-            # 2. أزرار السيرفرات
+            # 2. أزرار السيرفرات الفرعية
             for el in soup.find_all(["li", "button", "a", "div"]):
                 if el.get("data-crypt"):
                     decoded = self.decode_base64(el["data-crypt"])
@@ -121,27 +144,27 @@ class TukTukAPI:
 
             for idx, p_url in enumerate(players, 1):
                 domain = p_url.split('/')[2] if '//' in p_url else "Server"
-                logger.info(f"🔄 معالجة السيرفر [{idx}]: {p_url}")
-                
                 direct_url = self._extract_direct_stream(p_url)
                 
                 if direct_url:
-                    logger.info(f"   ├─ 🔥 تم العثور على بث مباشر: {direct_url[:50]}...")
+                    logger.info(f"   ├─ 🔥 بث مباشر مكتشف: {direct_url[:50]}...")
                     stremio_streams.append({
                         "name": "TukTuk",
                         "title": f"🎬 {domain}\n🌐 M3U8 Direct",
                         "url": self.get_proxied_url(direct_url)
                     })
                 else:
-                    logger.info(f"   ├─ 🌐 إضافة كمشغل خارجي: {p_url}")
+                    logger.info(f"   ├─ 🌐 مشغل مدمج متوافق مع Forward: {p_url}")
                     stremio_streams.append({
                         "name": "TukTuk",
                         "title": f"🎬 {domain}\n🌐 Web Player",
-                        "externalUrl": p_url
+                        "url": p_url,          # إرسال الرابط كـ url ليتعرف عليه Forward
+                        "webVideo": p_url,      # دعم خاص بـ Forward و Stremio Web
+                        "externalUrl": p_url   # دعم احتياطي
                     })
 
         except Exception as e:
             logger.error(f"❌ [Stream Error] خطأ رئيسي أثناء جلب البث: {e}")
             
-        logger.info(f"🏁 [RESPONSE READY] عدد الروابط المرجعة إلى Stremio/Forward: {len(stremio_streams)}")
+        logger.info(f"🏁 [RESPONSE READY] عدد الروابط المرجعة: {len(stremio_streams)}")
         return stremio_streams
